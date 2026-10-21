@@ -1,0 +1,32 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Dataset storage and generated outputs
+workspace/
+workspace_old/
+exports/
+bndocvqa_export_*/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+/pilot_data/
