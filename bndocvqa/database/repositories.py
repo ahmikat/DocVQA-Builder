@@ -109,7 +109,7 @@ class QuestionRepo:
         now = utcnow()
         q.created_at = q.created_at or now
         q.updated_at = q.updated_at or now
-        vals = [int(getattr(q, k)) if k == "edited" else getattr(q, k) for k in self.SCALAR]
+        vals = [int(getattr(q, k)) if k in ("edited", "reviewed") else getattr(q, k) for k in self.SCALAR]
         con.execute(f"INSERT INTO questions ({','.join(self.SCALAR)}) VALUES ({','.join('?' * len(self.SCALAR))})",
                     vals)
         self._children(con, q)
@@ -131,10 +131,14 @@ class QuestionRepo:
             con.execute("INSERT INTO question_history (question_id, changed_at, snapshot) VALUES (?,?,?)",
                         (q.question_id, utcnow(), json.dumps(asdict(before), ensure_ascii=False)))
             q.updated_at = utcnow()
-            q.edited = True
+            q.edited = before.edited or any(getattr(q, field) != getattr(before, field) for field in (
+                "question_bn", "question_format", "question_type", "options", "correct_option",
+                "answer_bn", "primary_axis", "sub_axes", "evidence_snippet", "rationale"))
+            q.reviewed = True
+            q.reviewed_at = q.updated_at
             sets = ",".join(f"{k}=?" for k in self.SCALAR if k != "question_id")
             con.execute(f"UPDATE questions SET {sets} WHERE question_id=?",
-                        [int(getattr(q, k)) if k == "edited" else getattr(q, k)
+                        [int(getattr(q, k)) if k in ("edited", "reviewed") else getattr(q, k)
                          for k in self.SCALAR if k != "question_id"] + [q.question_id])
             self._children(con, q)
         return q
@@ -156,11 +160,16 @@ class QuestionRepo:
     def counts_by_document(self) -> dict[str, int]:
         return {r[0]: r[1] for r in self.db.query("SELECT document_id, COUNT(*) FROM questions GROUP BY document_id")}
 
+    def reviewed_counts_by_document(self) -> dict[str, int]:
+        return {r[0]: r[1] for r in self.db.query(
+            "SELECT document_id, COUNT(*) FROM questions WHERE reviewed=1 GROUP BY document_id")}
+
     def _load(self, where: str, params: tuple) -> list[Question]:
         rows = self.db.query(f"SELECT q.* FROM questions q JOIN pages p ON p.page_id=q.page_id {where}", params)
         out: dict[str, Question] = {}
         for r in rows:
-            out[r["question_id"]] = _row_to(Question, r, edited=bool(r["edited"]))
+            out[r["question_id"]] = _row_to(Question, r, edited=bool(r["edited"]),
+                                             reviewed=bool(r["reviewed"]))
         if not out:
             return []
         ids = list(out)
@@ -213,8 +222,12 @@ class JobRepo:
 
     def claim_next(self, now: str) -> Optional[Job]:
         with self.db.tx() as c:
-            r = c.execute("SELECT job_id FROM jobs WHERE status='queued' AND (next_attempt_at='' OR next_attempt_at<=?)"
-                          " ORDER BY created_at, rowid LIMIT 1", (now,)).fetchone()
+            r = c.execute(
+                "SELECT j.job_id FROM jobs j WHERE j.status='queued' "
+                "AND (j.next_attempt_at='' OR j.next_attempt_at<=?) "
+                "AND NOT EXISTS (SELECT 1 FROM jobs active WHERE active.document_id=j.document_id "
+                "AND active.status='running') "
+                "ORDER BY j.created_at, j.rowid LIMIT 1", (now,)).fetchone()
             if r is None:
                 return None
             c.execute("UPDATE jobs SET status='running', started_at=?, attempts=attempts+1 WHERE job_id=?",

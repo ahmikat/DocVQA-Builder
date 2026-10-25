@@ -62,6 +62,8 @@ class Question:
     created_at: str = ""
     updated_at: str = ""
     edited: bool = False
+    reviewed: bool = False  # explicitly saved in View; eligible for dataset files
+    reviewed_at: str = ""
 
     def option_map(self) -> dict[str, str]:
         return {o.label: o.text for o in self.options}

@@ -1,22 +1,35 @@
 """Library: import, tick documents, process, view, export."""
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QBrush, QColor, QDesktopServices
-from PySide6.QtWidgets import (QAbstractItemView, QApplication, QFileDialog, QHBoxLayout, QHeaderView, QLabel,
-                               QMessageBox, QProgressDialog, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout,
-                               QWidget)
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QFileDialog, QFrame, QHBoxLayout, QHeaderView,
+                               QLabel, QLineEdit, QMessageBox, QProgressDialog, QPushButton, QTableWidget,
+                               QTableWidgetItem, QVBoxLayout, QWidget)
 
 from ..services.context import AppContext
-from ..services.export import ExportBlocked, export_dataset
+from ..services.portable import export_workspace_archive
 from ..services.library import SUPPORTED_EXTS, LibraryService
+from ..services.question_limits import max_questions_for_document
 
-COLS = ["", "Name", "File", "Pages", "Questions", "Status"]
-STATUS_COLORS = {"finished": "#15803d", "processing": "#2563eb", "waiting": "#b45309", "failed": "#b91c1c",
-                 "partial": "#7c3aed", "new": "#6b7280"}
+COLS = ["", "Name", "File", "Pages", "Questions", "Saved", "Gemini Generated"]
+STATUS_COLORS = {"finished": "#55d6b1", "processing": "#8bb8ff", "waiting": "#f3c779",
+                 "failed": "#ff99aa", "partial": "#c6a8ff", "new": "#a9bbd2"}
+
+
+def _open_local_html(path: Path) -> bool:
+    """Use the Windows file association first, then Qt's cross-platform opener."""
+    if os.name == "nt":
+        try:
+            os.startfile(str(path))
+            return True
+        except OSError:
+            pass
+    return QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
 
 class LibraryView(QWidget):
@@ -28,16 +41,59 @@ class LibraryView(QWidget):
 
     def __init__(self, ctx: AppContext, parent=None):
         super().__init__(parent)
+        self.setObjectName("libraryPage")
         self.ctx = ctx
         self.lib = LibraryService(ctx)
         self._checked: set[str] = set()
 
+        hero = QFrame()
+        hero.setObjectName("hero")
+        hero_lay = QVBoxLayout(hero)
+        hero_lay.setContentsMargins(16, 11, 16, 11)
+        hero_lay.setSpacing(3)
+        eyebrow = QLabel("BANGLA DOCVQA  /  DATASET WORKSPACE")
+        eyebrow.setObjectName("eyebrow")
+        title = QLabel("Document library")
+        title.setObjectName("pageTitle")
+        subtitle = QLabel("Import documents, generate questions, review each answer, then export your saved set.")
+        subtitle.setObjectName("muted")
+        subtitle.setWordWrap(True)
+        hero_lay.addWidget(eyebrow)
+        hero_lay.addWidget(title)
+        hero_lay.addWidget(subtitle)
+
+        metrics = QHBoxLayout()
+        metrics.setSpacing(8)
+        self.metric_values = {}
+        for key, label in (("documents", "Documents"), ("generated", "Generated questions"),
+                           ("saved", "Saved for export"), ("finished", "Gemini finished")):
+            card = QFrame()
+            card.setObjectName("metricCard")
+            card_lay = QVBoxLayout(card)
+            card_lay.setContentsMargins(12, 7, 12, 7)
+            card_lay.setSpacing(1)
+            value = QLabel("0")
+            value.setObjectName("metricValue")
+            caption = QLabel(label)
+            caption.setObjectName("metricLabel")
+            card_lay.addWidget(value)
+            card_lay.addWidget(caption)
+            self.metric_values[key] = value
+            metrics.addWidget(card, 1)
+
         self.table = QTableWidget(0, len(COLS))
         self.table.setHorizontalHeaderLabels(COLS)
+        self.table.horizontalHeaderItem(4).setToolTip("Generated questions / document maximum")
+        self.table.horizontalHeaderItem(5).setToolTip("Manually saved questions / generated questions")
+        self.table.horizontalHeaderItem(6).setToolTip("Finished when all pages have been processed")
         h = self.table.horizontalHeader()
         h.setSectionResizeMode(2, QHeaderView.Stretch)
-        h.setSectionResizeMode(5, QHeaderView.ResizeToContents)
+        h.setSectionResizeMode(6, QHeaderView.ResizeToContents)
         self.table.setColumnWidth(0, 34)
+        self.table.setShowGrid(False)
+        self.table.setAlternatingRowColors(True)
+        self.table.setWordWrap(False)
+        self.table.verticalHeader().setDefaultSectionSize(38)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.verticalHeader().setVisible(False)
@@ -49,21 +105,66 @@ class LibraryView(QWidget):
             b.clicked.connect(fn)
             b.setToolTip(tip)
             return b
-        bar = QHBoxLayout()
-        bar.addWidget(btn("Import files…", self.import_files, "Add PDFs or images; they are named doc_1, doc_2, …"))
-        bar.addWidget(btn("Import folder…", self.import_folder))
-        bar.addWidget(btn("▶ Process", self._process, "Generate questions for the ticked documents"))
-        bar.addWidget(btn("View", self._view, "Open the ticked (or highlighted) document in the View tab"))
-        bar.addWidget(btn("Export…", self._export, "Export finished documents (ticked ones, or all if none ticked)"))
-        bar.addStretch(1)
-        bar.addWidget(btn("Select all", lambda: self._set_all(True)))
-        bar.addWidget(btn("Clear", lambda: self._set_all(False)))
-        bar.addWidget(btn("Remove…", self.remove_checked, "Remove the ticked documents (files go to trash)"))
-        bar.addWidget(btn("Gemini API keys…", self.keysRequested.emit, "Add, remove and test API keys; pick the model"))
+        actions = QFrame()
+        actions.setObjectName("toolbarSurface")
+        action_lay = QVBoxLayout(actions)
+        action_lay.setContentsMargins(11, 9, 11, 9)
+        action_lay.setSpacing(7)
+        primary = QHBoxLayout()
+        primary.setSpacing(7)
+        primary.addWidget(btn("Import files…", self.import_files, "Add PDFs or images; they are named doc_1, doc_2, …"))
+        primary.addWidget(btn("Import folder…", self.import_folder))
+        primary.addWidget(btn("Generate questions", self._process, "Generate questions for the ticked documents"))
+        primary.addWidget(btn("Review questions", self._view,
+                              "Open the ticked (or highlighted) document for editing"))
+        primary.addWidget(btn("View", self._open_data_viewer,
+                              "Open the HTML overview of saved questions and document pages"))
+        primary.addWidget(btn("Export ZIP…", self._export, "Archive all current data, documents and images"))
+        primary.addStretch(1)
+        primary.addWidget(btn("Gemini API keys…", self.keysRequested.emit, "Add, remove and test API keys; pick the model"))
+        action_lay.addLayout(primary)
+        secondary = QHBoxLayout()
+        secondary.setSpacing(7)
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Search document name or filename…")
+        self.search.setClearButtonEnabled(True)
+        self.search.setMinimumWidth(260)
+        self.search.textChanged.connect(self._apply_filter)
+        secondary.addWidget(self.search, 1)
+        secondary.addWidget(btn("Select all", lambda: self._set_all(True)))
+        secondary.addWidget(btn("Clear", lambda: self._set_all(False)))
+        secondary.addWidget(btn("Remove…", self.remove_checked, "Remove the ticked documents (files go to trash)"))
+        action_lay.addLayout(secondary)
+
+        table_surface = QFrame()
+        table_surface.setObjectName("surface")
+        table_lay = QVBoxLayout(table_surface)
+        table_lay.setContentsMargins(10, 9, 10, 10)
+        table_lay.setSpacing(7)
+        section = QLabel("Documents")
+        section.setObjectName("sectionTitle")
+        section_hint = QLabel("Double-click a row to review its questions")
+        section_hint.setObjectName("sectionHint")
+        section_line = QHBoxLayout()
+        section_line.addWidget(section)
+        section_line.addStretch(1)
+        section_line.addWidget(section_hint)
+        table_lay.addLayout(section_line)
+        table_lay.addWidget(self.table, 1)
+        self.empty_state = QLabel("Your library is empty. Import a PDF or image to get started.")
+        self.empty_state.setObjectName("emptyState")
+        self.empty_state.setAlignment(Qt.AlignCenter)
+        self.empty_state.setWordWrap(True)
+        table_lay.addWidget(self.empty_state, 1)
         self.summary = QLabel()
+        self.summary.setObjectName("helper")
         lay = QVBoxLayout(self)
-        lay.addLayout(bar)
-        lay.addWidget(self.table, 1)
+        lay.setContentsMargins(14, 12, 14, 11)
+        lay.setSpacing(9)
+        lay.addWidget(hero)
+        lay.addLayout(metrics)
+        lay.addWidget(actions)
+        lay.addWidget(table_surface, 1)
         lay.addWidget(self.summary)
 
         self.timer = QTimer(self, interval=1500, timeout=self.refresh)
@@ -76,19 +177,20 @@ class LibraryView(QWidget):
         if active:
             now = datetime.now(timezone.utc).isoformat(timespec="seconds")
             if all(j.next_attempt_at and j.next_attempt_at > now and "daily quota" in j.error for j in active):
-                return "waiting", f"⏸ Waiting for daily quota ({done}/{pages} pages)"
-            return "processing", f"⏳ Processing… {done}/{pages} pages"
+                return "waiting", f"Unfinished · quota wait ({done}/{pages})"
+            return "processing", f"Unfinished · generating ({done}/{pages})"
         if pages and done == pages:
-            return "finished", "✔ Finished"
+            return "finished", "Finished"
         if failed:
-            return "failed", f"⚠ {failed} page(s) failed — Process again to retry"
+            return "failed", f"Unfinished · {failed} failed (retry)"
         if done:
-            return "partial", f"◐ {done}/{pages} pages — Process to finish"
-        return "new", "Not processed"
+            return "partial", f"Unfinished · {done}/{pages} pages"
+        return "new", "Unfinished"
 
     def refresh(self) -> None:
         docs = self.ctx.documents.list()
         counts = self.ctx.questions.counts_by_document()
+        saved_counts = self.ctx.questions.reviewed_counts_by_document()
         st = self.ctx.documents.page_status_counts()
         active: dict[str, list] = {}
         for j in self.ctx.jobs.list(statuses=("queued", "running")):
@@ -107,18 +209,38 @@ class LibraryView(QWidget):
             chk.setData(Qt.UserRole, d.document_id)
             self.table.setItem(r, 0, chk)
             for c, v in enumerate((d.document_id, d.original_filename, d.page_count,
-                                   counts.get(d.document_id, 0)), start=1):
+                                   f"{counts.get(d.document_id, 0)}/{max_questions_for_document(d.page_count)}",
+                                   f"{saved_counts.get(d.document_id, 0)}/{counts.get(d.document_id, 0)}"), start=1):
                 it = QTableWidgetItem(str(v))
-                if c in (3, 4):
+                if c in (3, 4, 5):
                     it.setTextAlignment(Qt.AlignCenter)
                 self.table.setItem(r, c, it)
             s = QTableWidgetItem(text)
             s.setForeground(QBrush(QColor(STATUS_COLORS[key])))
-            self.table.setItem(r, 5, s)
+            font = s.font()
+            font.setBold(True)
+            s.setFont(font)
+            self.table.setItem(r, 6, s)
         self.table.blockSignals(False)
+        self.table.setVisible(bool(docs))
+        self.empty_state.setVisible(not docs)
+        self.metric_values["documents"].setText(str(len(docs)))
+        self.metric_values["generated"].setText(str(sum(counts.values())))
+        self.metric_values["saved"].setText(str(sum(saved_counts.values())))
+        self.metric_values["finished"].setText(str(totals["finished"]))
+        self._apply_filter()
         self.summary.setText(f"{len(docs)} document(s) · {totals['finished']} finished · "
                              f"{totals['processing']} processing · {totals['waiting']} waiting for quota · "
-                             f"{len(self._checked)} ticked")
+                             f"{len(self._checked)} ticked"
+                             + (" · Data file sync failed; check logs" if self.ctx.db.last_mirror_error else ""))
+
+    def _apply_filter(self) -> None:
+        needle = self.search.text().strip().casefold()
+        for row in range(self.table.rowCount()):
+            name = self.table.item(row, 1)
+            source = self.table.item(row, 2)
+            searchable = f"{name.text() if name else ''} {source.text() if source else ''}".casefold()
+            self.table.setRowHidden(row, bool(needle) and needle not in searchable)
 
     def _item_changed(self, item: QTableWidgetItem) -> None:
         if item.column() == 0:
@@ -196,20 +318,32 @@ class LibraryView(QWidget):
         if not location:
             return
         try:
-            res = export_dataset(self.ctx, location, self.checked_ids() or None)
-        except ExportBlocked as e:
+            res = export_workspace_archive(self.ctx, location)
+        except (OSError, ValueError) as e:
             QMessageBox.warning(self, "Export", str(e))
             return
-        note = (f"\n\nSkipped {len(res.skipped_unfinished)} unfinished document(s): "
-                f"{', '.join(res.skipped_unfinished[:10])}" if res.skipped_unfinished else "")
         box = QMessageBox(QMessageBox.Information, "Export finished",
-                          f"Exported {res.documents} document(s), {res.questions} question(s) to:\n{res.path}{note}",
+                          f"Archived {res.documents} document(s), {res.pages} page(s), "
+                          f"{res.questions} saved question(s) to:\n{res.path}",
                           parent=self)
         open_btn = box.addButton("Open index.html", QMessageBox.AcceptRole)
         box.addButton(QMessageBox.Close)
         box.exec()
         if box.clickedButton() is open_btn:
-            QDesktopServices.openUrl(QUrl.fromLocalFile(str(res.path / "index.html")))
+            if not _open_local_html(res.folder / "index.html"):
+                QMessageBox.warning(self, "Export", "Could not open the exported index.html in a browser.")
+
+    def _open_data_viewer(self):
+        try:
+            self.ctx.portable.sync()
+        except Exception as exc:
+            QMessageBox.warning(self, "Data viewer", f"Could not update the HTML viewer:\n{exc}")
+            return
+        path = (self.ctx.data_dir / "index.html").resolve()
+        if not _open_local_html(path):
+            QMessageBox.warning(self, "Data viewer", f"Could not open the browser. Open this file manually:\n{path}")
+        else:
+            self.status.emit(f"Opened saved-question HTML: {path}")
 
     def remove_checked(self):
         ids = self.checked_ids()

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import math
 import uuid
 from dataclasses import dataclass
 from typing import Callable
@@ -20,6 +21,7 @@ from .context import AppContext
 from .gemini.parsing import as_str, require_list
 from .gemini.provider import ImagePart, Provider, ResponseBlocked, Usage
 from .mcq import build_question
+from .question_limits import max_questions_for_document
 
 log = logging.getLogger(__name__)
 
@@ -55,10 +57,42 @@ class Pipeline:
     # -- execution --------------------------------------------------------
     def run(self, job: Job, provider: Provider, cancelled: Callable[[], bool]) -> StageOutcome:
         page = self.ctx.pages.get(job.page_id)
+        doc = self.ctx.documents.get(page.document_id)
+        cap = max_questions_for_document(doc.page_count)
+        if page.status == DONE and self.ctx.db.query_one(
+                "SELECT COUNT(*) FROM questions WHERE page_id=? AND reviewed=1", (page.page_id,))[0]:
+            return StageOutcome("existing page kept: saved questions", Usage())
+        other_count = self.ctx.db.query_one(
+            "SELECT COUNT(*) FROM questions WHERE document_id=? AND page_id<>?",
+            (page.document_id, page.page_id))[0]
+        if page.status == DONE and other_count + self.ctx.db.query_one(
+                "SELECT COUNT(*) FROM questions WHERE page_id=?", (page.page_id,))[0] > cap:
+            # A recovered old job must not trim legacy data that predates this cap.
+            return StageOutcome("existing page kept: legacy document exceeds question limit", Usage())
+        remaining = max(0, cap - other_count)
+        pending = self.ctx.db.query_one(
+            "SELECT COUNT(*) FROM pages WHERE document_id=? AND status<>?",
+            (page.document_id, DONE))[0]
+        page_budget = math.ceil(remaining / max(1, pending))
+        if not page_budget:
+            if self.ctx.jobs.status(job.job_id) != "running":
+                return StageOutcome("cancelled before write", Usage())
+            if page.status == DONE:
+                return StageOutcome("existing page kept: document question limit reached", Usage())
+            with self.ctx.db.tx() as con:
+                self.ctx.questions.replace_for_page(page.page_id, [], con)
+                self.ctx.pages.set_content(page.page_id, "question_limit_reached",
+                                           "Document question limit reached", con)
+                self.ctx.pages.set_status(page.page_id, DONE, con=con)
+            return StageOutcome("no questions: document question limit reached", Usage())
+        # A queued job may have been created before a prompt edit and app restart.
+        if job.prompt_version != P.PROMPT_VERSION:
+            self.ctx.jobs.update(job.job_id, prompt_version=P.PROMPT_VERSION)
+            job.prompt_version = P.PROMPT_VERSION
         path = self.ctx.abs_path(page.image_path)
         mime = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
         try:
-            res = provider.generate_json(job.model, P.page_prompt(self.ctx.settings.questions_per_page),
+            res = provider.generate_json(job.model, P.page_prompt(page_budget, cap),
                                          [ImagePart(path.read_bytes(), mime)], P.PAGE_SCHEMA,
                                          self.ctx.settings.gemini_temperature, cancelled)
         except ResponseBlocked as e:
@@ -79,6 +113,8 @@ class Pipeline:
         questions = []
         abstentions = 0
         for item in items:
+            if len(questions) >= page_budget:
+                break
             n = len(questions) + 1
             q = build_question(item, f"{page.page_id}_q{n}", self.ctx.settings.abstain_distractor_ratio)
             if q is None:
@@ -93,6 +129,11 @@ class Pipeline:
         if self.ctx.jobs.status(job.job_id) != "running":
             return StageOutcome("cancelled before write", res.usage, res.raw_text)
         with self.ctx.db.tx() as con:
+            # Check again under the write lock, including edits from another app instance.
+            other_count = con.execute(
+                "SELECT COUNT(*) FROM questions WHERE document_id=? AND page_id<>?",
+                (page.document_id, page.page_id)).fetchone()[0]
+            questions = questions[:max(0, cap - other_count)]
             self.ctx.questions.replace_for_page(page.page_id, questions, con)
             self.ctx.pages.set_content(page.page_id, page_type, note, con)
             self.ctx.pages.set_status(page.page_id, DONE, con=con)

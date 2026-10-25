@@ -4,10 +4,22 @@ A desktop app that turns Bangla and Bangla-English PDFs into a multiple-choice D
 
 ## Install
 
-Requires Python 3.11+.
+Requires Python 3.11+ and an internet connection for the first dependency install.
 
 ```bash
+git clone https://github.com/ahmikat/DocVQA-Builder.git
+cd DocVQA-Builder
+```
+
+On Windows, double-click `Run Bangla DocVQA Builder.bat`. It creates a local
+`.venv`, installs the dependencies, and starts the desktop app. On macOS or
+Linux, create an environment and run the app from the repository folder:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
+python -m bndocvqa
 ```
 
 ## Use
@@ -16,16 +28,22 @@ pip install -r requirements.txt
 python -m bndocvqa
 ```
 
+On Windows, you can also run `python -m bndocvqa` from an activated environment
+if you want to see startup errors in a terminal.
+
 1. **Gemini API keys…**: add one or more keys, each tagged with its Google Cloud project, and pick the model. Use **Test selected** to check a key; the test uses no quota.
 2. **Import files…** or **Import folder…**: files are named `doc_1`, `doc_2`, … in import order.
-3. Tick the documents you want, then click **▶ Process**.
-   - Each page is sent to Gemini on its own (one request per page).
-   - Gemini returns about 5 questions per page, fewer for sparse pages and more for dense ones. Each question comes with its answer, its primary and sub-axes from Taxonomy v4, and its options.
-   - The **Status** column shows progress. If the daily quota runs out, pages wait and continue automatically after the reset (midnight Pacific time).
-4. **View**: browse a document's pages and questions, filter by axis (with counts), and edit a question, then **Save**. Edited questions are marked, and the previous version is kept.
-5. **Export…**: choose a folder. Only finished documents (every page processed) are exported, into `bndocvqa_export_<timestamp>/`. The export contains the original documents, the page images, the questions (JSONL, CSV, XLSX) and a manifest. Open its `index.html` in a browser to browse the result.
+   - The Library cards summarize documents, generated questions, saved questions, and completed Gemini jobs. Use the search box to find a document by name or filename.
+3. Tick the documents you want, then click **Generate questions**.
+   - Each page is processed separately (at most one Gemini request per page; no request after the document's question budget is exhausted).
+   - The app distributes a document-level question budget across its pages. Maximums: 1 page → 5; 2 → 8; 3 → 10; 4 → 12; 5 → 15; more than 5 → 20. Sparse pages may get fewer or none. Gemini receives the current page's limit, and the app enforces the document cap before saving.
+   - **Gemini Generated** shows Finished when every page has been processed, or Unfinished while work remains. If the daily quota runs out, pages wait and continue automatically after the reset (midnight Pacific time).
+4. **Review questions** opens the View tab: review each generated question and click **Save** to include it in dataset CSV/JSON/JSONL/XLSX. You can save an unchanged question. **Saved** in the Library shows saved questions out of all generated questions. Actual text edits are marked separately, and the previous version is kept. The Library **View** button opens `workspace/index.html` in your browser; it shows document/page information and saved questions only.
+5. **Export ZIP…**: choose a folder. The app saves both `bndocvqa_archive_<timestamp>.zip` and an unpacked folder of the same name. Both contain **all current documents and pages**, including unfinished ones, with the readable data files and an offline `index.html` viewer.
 
-If a page fails, its row says so. Click **▶ Process** again to retry only the unfinished pages.
+If a page fails, its row says so. Click **Generate questions** again to retry only the unfinished pages.
+
+To edit Gemini's instructions, change `page_prompt()` in `bndocvqa/prompts/__init__.py`, increase `PROMPT_VERSION`, save, and restart the app (close and reopen the `.bat` launcher). Finish or cancel queued jobs before changing the prompt if you need a clean version boundary. Existing finished pages are not regenerated automatically. The page-count limits are enforced in code, so changing prompt wording alone cannot raise them. The `QUESTIONS_PER_PAGE` legacy setting no longer controls generation.
 
 **Pages without questions.** Gemini first classifies every page (text, table, form, chart, cover, …). Some pages get no questions:
 - blank pages;
@@ -35,7 +53,7 @@ If a page fails, its row says so. Click **▶ Process** again to retry only the 
 - unreadable pages;
 - pages Gemini refuses for safety reasons.
 
-The app enforces this itself, not just through the prompt. These pages still count as processed, so the document can finish and be exported. The View tab and the export's `index.html` show the reason, e.g. "No questions on this page: signature or stamp, round seal and signature".
+The app enforces this itself, not just through the prompt. These pages still count as processed. The View tab shows why a page has no generated questions; the HTML viewer shows page details and notes when there are no saved questions.
 
 ## What a question looks like
 
@@ -53,13 +71,16 @@ python -m bndocvqa import path\to\pdfs
 python -m bndocvqa list
 python -m bndocvqa process doc_1 doc_2
 python -m bndocvqa export D:\exports
-python -m bndocvqa evaluate D:\exports\bndocvqa_export_...\questions.jsonl predictions.jsonl
+python -m bndocvqa evaluate D:\exports\bndocvqa_archive_...\questions.jsonl predictions.jsonl
 ```
 
 ## Where things are stored
 
-- `workspace/` holds the database, the original files (read-only copies) and the page images. Removed documents go to `workspace/trash/`. It is git-ignored.
-- API keys added in the app are kept in Windows Credential Manager, never in files, logs or exports. Keys can also come from a `.env` file instead (see `.env.example`); `.env` is git-ignored.
+- `workspace/documents/` holds read-only copies of imported PDFs/images; `workspace/images/` holds rendered page images. Removed documents go to `workspace/trash/`. Existing `originals/` and `pages/` files are copied into this layout automatically on startup; the old files are left in place as a backup.
+- `workspace/data/` contains `state.json` and a JSON and CSV file for **every SQLite table**, including generated drafts, saved questions, options, edit history, jobs and request usage. This is a complete recovery snapshot. The top-level `workspace/questions.json`, `questions.jsonl` and `questions.csv` contain **only questions manually saved in the View tab**. `workspace/index.html` shows document/page information and those saved questions only. These files update after changes, and are flushed on app close and export.
+- SQLite remains the app's working transaction and job-queue database (`workspace/bndocvqa.sqlite`). If that database is missing, the app rebuilds it from `workspace/data/state.json` when the media folders are present. Edit questions in the app; manually editing CSV/JSON while the database exists does not change app state.
+- API keys added in the app use Windows Credential Manager when available. `~/.bndocvqa/keys.json` holds labels/projects; if no credential store is available, it may also contain keys. Keys can come from a `.env` file instead (see `.env.example`). Neither the key store nor `.env` is included in the ZIP.
+- The complete ZIP contains `documents/`, `images/`, `data/`, saved-only `questions.json`/JSONL/CSV/XLSX, `index.html` and a SHA-256 manifest. `data/` still contains every draft for recovery. Keep this archive private when the documents or questions are private.
 
 ## Project layout
 
@@ -74,8 +95,13 @@ bndocvqa/
   ui/          PySide6 screens (Library, View)
 tests/         pytest suite with synthetic PDFs and a mocked Gemini
 docs/          taxonomy, export format, Gemini setup
-pilot_data/    16 sample Bangladeshi documents to try the app with, plus an earlier pilot's output
+Run Bangla DocVQA Builder.bat  one-click Windows launcher
 ```
+
+This repository builds on the original
+[Bangla-DocVQA-dataset-builder](https://github.com/Sazzad14802/Bangla-DocVQA-dataset-builder).
+Documents, page images, generated questions, API keys, and exports are local
+data and are not included in this repository.
 
 ## Tests
 

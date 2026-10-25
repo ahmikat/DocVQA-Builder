@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+import logging
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
 
 MIGRATIONS_DIR = Path(__file__).with_name("migrations")
+log = logging.getLogger(__name__)
 
 
 def utcnow() -> str:
@@ -26,6 +28,9 @@ class Database:
         self.path = str(path)
         self._local = threading.local()
         self._write_lock = threading.RLock()
+        self.after_commit = None
+        self.flush_mirror = None
+        self.last_mirror_error = ""
 
     def _connect(self) -> sqlite3.Connection:
         con = sqlite3.connect(self.path, timeout=30, isolation_level=None, check_same_thread=False)
@@ -60,6 +65,14 @@ class Database:
                 raise
             else:
                 con.execute("COMMIT")
+                if self.after_commit is not None:
+                    try:
+                        self.after_commit()
+                    except Exception as exc:
+                        # The transaction is already durable. A mirror failure must not
+                        # make callers roll back media that SQLite now references.
+                        self.last_mirror_error = str(exc)
+                        log.exception("portable data mirror failed after commit")
 
     def query(self, sql: str, params: tuple | dict = ()) -> list[sqlite3.Row]:
         return self.con.execute(sql, params).fetchall()
@@ -68,6 +81,8 @@ class Database:
         return self.con.execute(sql, params).fetchone()
 
     def close(self) -> None:
+        if self.flush_mirror is not None:
+            self.flush_mirror()
         c = getattr(self._local, "con", None)
         if c is not None:
             c.close()

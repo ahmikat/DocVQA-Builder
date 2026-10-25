@@ -34,6 +34,9 @@ def app_font():
 
 
 def run(data_dir=None) -> int:
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QIcon, QPainter, QPixmap
+    from PySide6.QtSvg import QSvgRenderer
     from PySide6.QtWidgets import QApplication
 
     from ..services.context import open_context
@@ -41,6 +44,14 @@ def run(data_dir=None) -> int:
 
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("Bangla DocVQA Builder")
+    icon_svg = QSvgRenderer(str(Path(__file__).with_name("icons") / "brand.svg"))
+    if icon_svg.isValid():
+        icon_pixmap = QPixmap(64, 64)
+        icon_pixmap.fill(Qt.transparent)
+        painter = QPainter(icon_pixmap)
+        icon_svg.render(painter)
+        painter.end()
+        app.setWindowIcon(QIcon(icon_pixmap))
     app.setFont(app_font())
     install(app)
     ctx = open_context(data_dir)

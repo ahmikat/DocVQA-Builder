@@ -57,7 +57,7 @@ class Settings:
     gemini_keys: list[GeminiKey] = field(default_factory=list, repr=False)
 
     # Generation
-    questions_per_page: int = 5  # guidance for the prompt, never enforced
+    questions_per_page: int = 5  # legacy setting; document-level limits control generation
     abstain_distractor_ratio: float = 0.30
 
     @property
@@ -66,11 +66,11 @@ class Settings:
 
     @property
     def originals_dir(self) -> Path:
-        return self.data_dir / "originals"
+        return self.data_dir / "documents"
 
     @property
     def pages_dir(self) -> Path:
-        return self.data_dir / "pages"
+        return self.data_dir / "images"
 
     @property
     def logs_dir(self) -> Path:

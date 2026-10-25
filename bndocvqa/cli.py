@@ -21,7 +21,9 @@ def cmd_import(args):
     files: list[Path] = []
     for p in map(Path, args.paths):
         files += sorted(f for f in p.rglob("*") if f.suffix.lower() in SUPPORTED_EXTS) if p.is_dir() else [p]
-    res = LibraryService(_ctx(args)).import_files(files)
+    ctx = _ctx(args)
+    res = LibraryService(ctx).import_files(files)
+    ctx.portable.sync()
     _print({"imported": [(d.document_id, d.original_filename, d.page_count) for d in res.imported],
             "duplicates": [(str(p), d.document_id) for p, d in res.duplicates],
             "failed": [(str(p), e) for p, e in res.failed]})
@@ -53,17 +55,18 @@ def cmd_process(args):
     runner = JobRunner(ctx, lambda: GeminiProvider(ctx.settings, request_log=RequestLog(ctx.db)),
                        on_event=lambda ev, j: sys.stdout.write(f"{ev}\t{j.page_id}\t{j.result_summary or j.error}\n"))
     runner.run_until_idle()
+    ctx.portable.sync()
 
 
 def cmd_export(args):
-    from .services.export import ExportBlocked, export_dataset
+    from .services.portable import export_workspace_archive
     try:
-        res = export_dataset(_ctx(args), args.location, args.document_ids or None)
-    except ExportBlocked as e:
-        sys.stderr.write(f"export blocked: {e}\n")
+        res = export_workspace_archive(_ctx(args), args.location)
+    except (OSError, ValueError) as e:
+        sys.stderr.write(f"export failed: {e}\n")
         return 2
-    _print({"path": str(res.path), "documents": res.documents, "questions": res.questions,
-            "skipped_unfinished": res.skipped_unfinished})
+    _print({"zip": str(res.path), "folder": str(res.folder), "documents": res.documents,
+            "pages": res.pages, "questions": res.questions})
 
 
 def cmd_evaluate(args):
@@ -93,9 +96,8 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("process", help="generate questions for documents (one Gemini request per page)")
     s.add_argument("document_ids", nargs="*")
     s.set_defaults(func=cmd_process)
-    s = sub.add_parser("export", help="export finished documents to <location>/bndocvqa_export_<timestamp>")
+    s = sub.add_parser("export", help="archive all current data and media as a ZIP")
     s.add_argument("location")
-    s.add_argument("document_ids", nargs="*")
     s.set_defaults(func=cmd_export)
     s = sub.add_parser("evaluate", help="score model predictions against an exported questions.jsonl")
     s.add_argument("references")

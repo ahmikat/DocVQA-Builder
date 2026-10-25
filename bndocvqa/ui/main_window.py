@@ -23,6 +23,7 @@ class MainWindow(QMainWindow):
         self.bridge = _Bridge()
         self.bridge.jobEvent.connect(self._on_job_event)
         self.setWindowTitle("Bangla DocVQA Builder")
+        self.setMinimumSize(1100, 700)
         self.resize(1500, 920)
 
         self.library = LibraryView(ctx)
@@ -116,4 +117,8 @@ class MainWindow(QMainWindow):
             e.ignore()
             return
         self.stop_runner()
+        try:
+            self.ctx.portable.sync()
+        except OSError as exc:
+            QMessageBox.warning(self, "Data file sync", f"SQLite data is saved, but JSON/CSV sync failed:\n{exc}")
         e.accept()

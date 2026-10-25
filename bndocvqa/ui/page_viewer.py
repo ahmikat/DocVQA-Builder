@@ -6,7 +6,7 @@ from typing import Optional
 from PySide6.QtCore import QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QAction, QBrush, QColor, QIcon, QPainter, QPixmap, QTransform
 from PySide6.QtWidgets import (QGraphicsPixmapItem, QGraphicsScene, QGraphicsView, QHBoxLayout, QLabel, QListWidget,
-                               QListWidgetItem, QSplitter, QToolBar, QVBoxLayout, QWidget)
+                               QListWidgetItem, QToolBar, QVBoxLayout, QWidget)
 
 from ..models.records import Page
 
@@ -17,7 +17,7 @@ class _View(QGraphicsView):
         self.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
         self.setDragMode(QGraphicsView.ScrollHandDrag)
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
-        self.setBackgroundBrush(QBrush(QColor("#5b616a")))
+        self.setBackgroundBrush(QBrush(QColor("#26364a")))
 
     def wheelEvent(self, e):
         if e.modifiers() & Qt.ControlModifier:
@@ -47,21 +47,21 @@ class PageViewer(QWidget):
         self.thumbs = QListWidget()
         self.thumbs.setViewMode(QListWidget.IconMode)
         self.thumbs.setFlow(QListWidget.TopToBottom)
-        self.thumbs.setIconSize(QSize(90, 120))
+        self.thumbs.setIconSize(QSize(80, 108))
         self.thumbs.setMovement(QListWidget.Static)
-        self.thumbs.setFixedWidth(120)
-        self.thumbs.setSpacing(4)
+        self.thumbs.setFixedWidth(108)
+        self.thumbs.setSpacing(7)
         self.thumbs.currentRowChanged.connect(self.show_index)
 
         tb = QToolBar()
         self.lbl = QLabel(" — ")
-        for text, tip, fn, key in (("◀", "Previous page (PgUp)", self.prev_page, "PgUp"),
-                                   ("▶", "Next page (PgDown)", self.next_page, "PgDown"),
+        for text, tip, fn, key in (("Prev", "Previous page (PgUp)", self.prev_page, "PgUp"),
+                                   ("Next", "Next page (PgDown)", self.next_page, "PgDown"),
                                    ("−", "Zoom out (Ctrl+-)", lambda: self.view.scale(1 / 1.2, 1 / 1.2), "Ctrl+-"),
                                    ("+", "Zoom in (Ctrl+=)", lambda: self.view.scale(1.2, 1.2), "Ctrl+="),
                                    ("Fit", "Fit page (Ctrl+0)", self.fit, "Ctrl+0"),
                                    ("100%", "Actual size", self.actual_size, None),
-                                   ("⟳", "Rotate view 90° (the stored image is not changed)", self.rotate, None)):
+                                   ("Rotate", "Rotate view 90° (the stored image is not changed)", self.rotate, None)):
             a = QAction(text, self)
             a.setToolTip(tip)
             a.triggered.connect(fn)
@@ -77,13 +77,11 @@ class PageViewer(QWidget):
         rl.setContentsMargins(0, 0, 0, 0)
         rl.addWidget(tb)
         rl.addWidget(self.view, 1)
-        split = QSplitter(Qt.Horizontal)
-        split.addWidget(self.thumbs)
-        split.addWidget(right)
-        split.setStretchFactor(1, 1)
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.addWidget(split)
+        lay.setSpacing(8)
+        lay.addWidget(self.thumbs)
+        lay.addWidget(right, 1)
 
     def set_pages(self, pages: list[Page]) -> None:
         self.pages = pages
@@ -91,7 +89,7 @@ class PageViewer(QWidget):
         self.thumbs.clear()
         for p in pages:
             pix = QPixmap(str(self._resolve(p.image_path)))
-            icon = QIcon(pix.scaled(90, 120, Qt.KeepAspectRatio, Qt.SmoothTransformation)) if not pix.isNull() else QIcon()
+            icon = QIcon(pix.scaled(80, 108, Qt.KeepAspectRatio, Qt.SmoothTransformation)) if not pix.isNull() else QIcon()
             it = QListWidgetItem(icon, str(p.page_number))
             it.setToolTip(p.page_id)
             self.thumbs.addItem(it)

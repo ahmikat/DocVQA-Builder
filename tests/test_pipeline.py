@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from bndocvqa.models.records import DONE, Question
 from bndocvqa.services.gemini.parsing import ResponseParseError, extract_json
 from bndocvqa.services.gemini.provider import PermanentError, TransientError
 from bndocvqa.services.gemini.ratelimit import QuotaExhausted
@@ -15,12 +16,13 @@ def test_one_request_per_page_and_questions_stored(ctx, doc):
     assert len(Pipeline(ctx).process_document("doc_1")) == 2
     run(ctx, fake)
     assert len(fake.calls) == 2 and all(c["images"] == 1 for c in fake.calls)
-    assert "about 5 questions" in fake.calls[0]["prompt"]
+    assert "AT MOST 4 questions for this page" in fake.calls[0]["prompt"]
+    assert "hard maximum of 8 questions" in fake.calls[0]["prompt"]
     qs = ctx.questions.for_document("doc_1")
     assert [q.question_id for q in qs] == ["doc_1_p1_q1", "doc_1_p1_q2", "doc_1_p1_q3", "doc_1_p2_q1"]
     assert all(p.status == "done" for p in ctx.pages.for_document("doc_1"))
     assert ctx.documents.is_finished("doc_1")
-    assert qs[0].model == ctx.settings.gemini_model and qs[0].prompt_version == "page-v2"
+    assert qs[0].model == ctx.settings.gemini_model and qs[0].prompt_version == "page-v3-doccap"
 
 
 def test_malformed_items_dropped_not_stored(ctx, doc):
@@ -66,6 +68,19 @@ def test_retrying_a_page_replaces_its_questions(ctx, doc):
     ctx.jobs.recover_interrupted()
     run(ctx, FakeProvider([{"questions": ITEMS[:1]}]))
     assert len([q for q in ctx.questions.for_document("doc_1") if q.page_id == job.page_id]) == 1
+
+
+def test_recovered_job_keeps_saved_question(ctx, doc):
+    run_pages(ctx, [{"questions": ITEMS[:1]}, {"questions": []}])
+    saved = ctx.questions.for_document("doc_1")[0]
+    ctx.questions.save_edit(saved)
+    job = ctx.jobs.list()[0]
+    ctx.jobs.update(job.job_id, status="running")
+    ctx.jobs.recover_interrupted()
+    fake = FakeProvider([])
+    run(ctx, fake)
+    assert fake.calls == []
+    assert ctx.questions.get(saved.question_id).reviewed
 
 
 def test_daily_quota_parks_pages(ctx, doc):
@@ -127,6 +142,78 @@ def test_prompt_forbids_questions_on_empty_pages():
     t = page_prompt(5)
     assert '"questions": []' in t and "QR code" in t and "at most ONE per page" in t
     assert set(NO_QUESTION_TYPES) <= set(PAGE_SCHEMA["properties"]["page_type"]["enum"])
+
+
+@pytest.mark.parametrize("pages,maximum", [(0, 0), (1, 5), (2, 8), (3, 10),
+                                              (4, 12), (5, 15), (6, 20), (20, 20)])
+def test_document_question_limit_mapping(pages, maximum):
+    from bndocvqa.services.question_limits import max_questions_for_document
+
+    assert max_questions_for_document(pages) == maximum
+
+
+def test_gemini_excess_is_trimmed_to_document_limit(ctx, doc):
+    many = [ITEMS[0]] * 12
+    fake = FakeProvider([{"page_type": "text", "questions": many}] * 2)
+    Pipeline(ctx).process_document("doc_1")
+    run(ctx, fake)
+    assert len(ctx.questions.for_document("doc_1")) == 8
+    assert all("AT MOST 4 questions for this page" in c["prompt"] for c in fake.calls)
+    assert [len([q for q in ctx.questions.for_document("doc_1") if q.page_id == p.page_id])
+            for p in ctx.pages.for_document("doc_1")] == [4, 4]
+
+
+def test_unused_budget_moves_to_later_page(ctx, doc):
+    fake = FakeProvider([{"page_type": "blank", "questions": ITEMS},
+                         {"page_type": "text", "questions": [ITEMS[0]] * 12}])
+    Pipeline(ctx).process_document("doc_1")
+    run(ctx, fake)
+    assert len(ctx.questions.for_document("doc_1")) == 8
+    assert "AT MOST 8 questions for this page" in fake.calls[1]["prompt"]
+
+
+def test_no_gemini_call_after_limit_reached(ctx, doc):
+    fake = FakeProvider([])
+    # Simulate a pre-existing count from an earlier, less strict version.
+    with ctx.db.tx() as con:
+        for n in range(8):
+            q = Question(
+                question_id=f"legacy_{n}", document_id="doc_1", page_id="doc_1_p1",
+                question_number=n + 1)
+            ctx.questions._insert(con, q)
+        ctx.pages.set_status("doc_1_p1", DONE, con=con)
+    Pipeline(ctx).process_document("doc_1")
+    run(ctx, fake)
+    assert fake.calls == []
+    assert len(ctx.questions.for_document("doc_1")) == 8
+    assert ctx.pages.get("doc_1_p2").content_type == "question_limit_reached"
+    assert all(j.status == "succeeded" for j in ctx.jobs.list())
+
+
+def test_legacy_over_limit_page_is_preserved_on_recovered_job(ctx, doc):
+    with ctx.db.tx() as con:
+        for n in range(9):
+            ctx.questions._insert(con, Question(
+                question_id=f"legacy_{n}", document_id="doc_1", page_id="doc_1_p1",
+                question_number=n + 1))
+        ctx.pages.set_status("doc_1_p1", DONE, con=con)
+    Pipeline(ctx).enqueue_page("doc_1_p1")
+    fake = FakeProvider([])
+    run(ctx, fake)
+    assert fake.calls == []
+    assert len(ctx.questions.for_document("doc_1")) == 9
+
+
+def test_only_one_page_per_document_is_claimed_at_a_time(ctx, doc):
+    from bndocvqa.database.connection import utcnow
+
+    Pipeline(ctx).process_document("doc_1")
+    first = ctx.jobs.claim_next(utcnow())
+    assert first is not None
+    assert ctx.jobs.claim_next(utcnow()) is None
+    ctx.jobs.update(first.job_id, status="succeeded")
+    second = ctx.jobs.claim_next(utcnow())
+    assert second is not None and second.page_id != first.page_id
 
 
 def test_safety_blocked_page_finishes_without_questions(ctx, doc):

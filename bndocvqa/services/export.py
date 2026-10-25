@@ -67,6 +67,8 @@ def question_record(q: Question, doc: Document, page: Page) -> dict:
         "evidence_snippet": q.evidence_snippet,
         "rationale": q.rationale,
         "edited": q.edited,
+        "reviewed": q.reviewed,
+        "reviewed_at": q.reviewed_at,
         "model": q.model,
         "prompt_version": q.prompt_version,
         "source_file": doc.original_filename,
@@ -76,7 +78,7 @@ def question_record(q: Question, doc: Document, page: Page) -> dict:
 CSV_COLUMNS = ["question_id", "document_id", "document_path", "page_id", "page_number", "image_path", "question_format",
                "question_type", "question_bn", "option_A", "option_B", "option_C", "option_D", "option_E",
                "correct_option", "answer_bn", "primary_axis", "axis_name", "sub_axes", "evidence_snippet",
-               "rationale", "edited", "model", "prompt_version", "source_file"]
+               "rationale", "edited", "reviewed", "reviewed_at", "model", "prompt_version", "source_file"]
 
 
 def _flat(r: dict) -> dict:
@@ -148,7 +150,8 @@ def export_dataset(ctx: AppContext, location: str | Path, document_ids: Iterable
     pages = {p.page_id: p for d in finished for p in ctx.pages.for_document(d)}
     for p in pages.values():
         shutil.copy2(ctx.abs_path(p.image_path), root / "images" / Path(p.image_path).name)
-    records = [question_record(q, docs[q.document_id], pages[q.page_id]) for q in ctx.questions.for_documents(finished)]
+    records = [question_record(q, docs[q.document_id], pages[q.page_id])
+               for q in ctx.questions.for_documents(finished) if q.reviewed]
     records.sort(key=lambda r: (_doc_order(r["document_id"]), r["page_number"], r["question_id"]))
 
     with open(root / "questions.jsonl", "w", encoding="utf-8", newline="\n") as f:

@@ -16,6 +16,8 @@ def two_docs(ctx, doc, tmp_path):
     LibraryService(ctx).import_file(make_pdf(tmp_path / "second.pdf", 1, "B"))  # doc_2, left unprocessed
     Pipeline(ctx).process_document("doc_1")
     run(ctx, FakeProvider([{"questions": ITEMS}, {"questions": ITEMS[:1]}]))
+    for question in ctx.questions.for_document("doc_1"):
+        ctx.questions.save_edit(question)  # explicitly include these in dataset exports
     return ctx
 
 

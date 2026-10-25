@@ -25,6 +25,7 @@ class ViewTab(QWidget):
 
     def __init__(self, ctx: AppContext, parent=None):
         super().__init__(parent)
+        self.setObjectName("viewPage")
         self.ctx = ctx
         self.document_id: Optional[str] = None
         self.q: Optional[Question] = None
@@ -39,21 +40,26 @@ class ViewTab(QWidget):
         self.viewer.pageChanged.connect(self._page_changed)
         self.page_info = QLabel()
         self.page_info.setWordWrap(True)
-        left = QWidget()
+        left = QFrame()
+        left.setObjectName("surface")
         ll = QVBoxLayout(left)
-        ll.setContentsMargins(0, 0, 0, 0)
+        ll.setContentsMargins(12, 10, 12, 10)
+        ll.setSpacing(8)
         top = QHBoxLayout()
-        top.addWidget(QLabel("Document:"))
+        source_title = QLabel("Source document")
+        source_title.setObjectName("sectionTitle")
+        top.addWidget(source_title)
         top.addWidget(self.doc_combo, 1)
         ll.addLayout(top)
         ll.addWidget(self.viewer, 1)
+        self.page_info.setObjectName("pageInfo")
         ll.addWidget(self.page_info)
 
         # right: filter + list
         self.axis_filter = QComboBox()
         self.axis_filter.currentIndexChanged.connect(self._fill_list)
         self.qlist = QListWidget()
-        self.qlist.setMaximumHeight(200)
+        self.qlist.setMaximumHeight(125)
         self.qlist.currentItemChanged.connect(self._list_changed)
         fl = QHBoxLayout()
         fl.addWidget(QLabel("Axis:"))
@@ -61,10 +67,11 @@ class ViewTab(QWidget):
 
         # right: editor
         self.header = QLabel()
+        self.header.setObjectName("questionHeader")
         self.header.setTextFormat(Qt.RichText)
         self.question_edit = QPlainTextEdit()
         self.question_edit.setObjectName("questionText")
-        self.question_edit.setFixedHeight(70)
+        self.question_edit.setFixedHeight(62)
         self.axis_combo = QComboBox()
         for a in AXES:
             self.axis_combo.addItem(f"{a.code} — {a.name}", a.code)
@@ -73,7 +80,7 @@ class ViewTab(QWidget):
         self.sub_axes = QListWidget()
         self.sub_axes.setFlow(QListWidget.LeftToRight)
         self.sub_axes.setWrapping(True)
-        self.sub_axes.setFixedHeight(78)
+        self.sub_axes.setFixedHeight(68)
         self.sub_axes.setGridSize(QSize(70, 22))
         self.sub_axes.setTextElideMode(Qt.ElideNone)
         for a in AXES:
@@ -105,7 +112,7 @@ class ViewTab(QWidget):
         og.addWidget(self.answer, 5, 1)
         self.evidence = QLineEdit()
         self.rationale = QPlainTextEdit()
-        self.rationale.setFixedHeight(54)
+        self.rationale.setFixedHeight(48)
 
         form = QFormLayout()
         form.addRow("Question", self.question_edit)
@@ -127,28 +134,65 @@ class ViewTab(QWidget):
         scroll.setFrameShape(QFrame.NoFrame)
 
         self.save_btn = QPushButton("Save")
-        self.save_btn.setToolTip("Save changes to this question (Ctrl+S)")
+        self.save_btn.setToolTip("Save and include this question in CSV/JSON/XLSX (Ctrl+S)")
         self.save_btn.clicked.connect(self.save)
         bl = QHBoxLayout()
         bl.addStretch(1)
         bl.addWidget(self.save_btn)
 
-        right = QWidget()
+        right = QFrame()
+        right.setObjectName("surface")
         rl = QVBoxLayout(right)
-        rl.setContentsMargins(0, 0, 0, 0)
+        rl.setContentsMargins(12, 10, 12, 10)
+        rl.setSpacing(8)
+        review_title = QLabel("Question review")
+        review_title.setObjectName("sectionTitle")
+        review_hint = QLabel("Check the page, answer and evidence. Save a question to include it in dataset files.")
+        review_hint.setObjectName("sectionHint")
+        review_hint.setWordWrap(True)
+        rl.addWidget(review_title)
+        rl.addWidget(review_hint)
         rl.addLayout(fl)
         rl.addWidget(self.qlist)
         rl.addWidget(scroll, 1)
+        divider = QFrame()
+        divider.setObjectName("separator")
+        divider.setFrameShape(QFrame.HLine)
+        rl.addWidget(divider)
         rl.addLayout(bl)
 
         split = QSplitter(Qt.Horizontal)
+        split.setChildrenCollapsible(False)
         split.addWidget(left)
         split.addWidget(right)
         split.setStretchFactor(0, 5)
         split.setStretchFactor(1, 5)
+        split.setSizes([700, 700])
+        hero = QFrame()
+        hero.setObjectName("hero")
+        hero_lay = QHBoxLayout(hero)
+        hero_lay.setContentsMargins(16, 11, 16, 11)
+        hero_lay.setSpacing(20)
+        heading = QVBoxLayout()
+        heading.setSpacing(2)
+        eyebrow = QLabel("REVIEW WORKSPACE")
+        eyebrow.setObjectName("eyebrow")
+        title = QLabel("Review questions")
+        title.setObjectName("pageTitle")
+        heading.addWidget(eyebrow)
+        heading.addWidget(title)
+        hero_lay.addLayout(heading)
+        hero_lay.addStretch(1)
+        self.review_summary = QLabel("0 saved / 0 generated")
+        self.review_summary.setObjectName("reviewSummary")
+        hero_lay.addWidget(self.review_summary)
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(6, 6, 6, 6)
-        lay.addWidget(split)
+        lay.setContentsMargins(14, 12, 14, 11)
+        column = QVBoxLayout()
+        column.setSpacing(9)
+        column.addWidget(hero)
+        column.addWidget(split, 1)
+        lay.addLayout(column)
         QShortcut(QKeySequence("Ctrl+S"), self, activated=self.save, context=Qt.WidgetWithChildrenShortcut)
         self._set_editor_enabled(False)
         self.reload_documents()
@@ -193,6 +237,8 @@ class ViewTab(QWidget):
 
     def _load_questions(self) -> None:
         self._questions = self.ctx.questions.for_document(self.document_id) if self.document_id else []
+        saved = sum(q.reviewed for q in self._questions)
+        self.review_summary.setText(f"{saved} saved / {len(self._questions)} generated")
         if self.viewer.current_page:
             self._page_changed(self.viewer.current_page.page_id)
         counts = Counter(q.primary_axis for q in self._questions)
@@ -216,7 +262,7 @@ class ViewTab(QWidget):
         for q in self._questions:
             if flt != "all" and q.primary_axis != flt:
                 continue
-            mark = "✎ " if q.edited else ""
+            mark = "[Saved, edited] " if q.reviewed and q.edited else "[Saved] " if q.reviewed else ""
             it = QListWidgetItem(f"p{pages.get(q.page_id, '?')}  [{q.primary_axis}]  {mark}{q.question_bn[:90]}")
             it.setData(Qt.UserRole, q.question_id)
             self.qlist.addItem(it)
@@ -266,8 +312,9 @@ class ViewTab(QWidget):
             self.q = q
             self._set_editor_enabled(True)
             page = self.ctx.pages.get(q.page_id)
-            edited = " &nbsp; <span style='color:#b45309'>edited</span>" if q.edited else ""
-            self.header.setText(f"<b>{q.question_id}</b> &nbsp; page {page.page_number if page else '?'}{edited}")
+            saved = " &nbsp; <span style='color:#63dfbc'>Saved for export</span>" if q.reviewed else " &nbsp; Draft · not in dataset files"
+            edited = " &nbsp; <span style='color:#f3c779'>edited</span>" if q.edited else ""
+            self.header.setText(f"<b>{q.question_id}</b> &nbsp; page {page.page_number if page else '?'}{saved}{edited}")
             self.question_edit.setPlainText(q.question_bn)
             self.axis_combo.setCurrentIndex(max(self.axis_combo.findData(q.primary_axis), 0))
             for k in range(self.sub_axes.count()):
@@ -342,6 +389,11 @@ class ViewTab(QWidget):
             QMessageBox.warning(self, "Cannot save", f"Not saved: {problem}.")
             return
         self.q = self.ctx.questions.save_edit(q)
-        self.status.emit(f"Saved {q.question_id}.")
+        try:
+            self.ctx.portable.sync()
+            self.status.emit(f"Saved {q.question_id}; included in dataset files.")
+        except Exception as exc:
+            self.ctx.db.last_mirror_error = str(exc)
+            QMessageBox.warning(self, "Dataset files", f"Question saved in the app, but CSV/JSON sync failed:\n{exc}")
         self._load_questions()
         self.questionsChanged.emit()

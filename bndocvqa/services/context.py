@@ -13,6 +13,7 @@ from .logging_setup import configure_logging
 class AppContext:
     settings: Settings
     db: Database
+    portable: object | None = None
 
     def __post_init__(self):
         self.documents = DocumentRepo(self.db)
@@ -31,8 +32,19 @@ class AppContext:
 
 def open_context(data_dir: str | Path | None = None, settings: Settings | None = None,
                  log: bool = True) -> AppContext:
+    from .portable import PortableStore, migrate_legacy_media, restore_state
+
     s = settings or load_settings(data_dir)
     s.ensure_dirs()
     if log:
         configure_logging(s)
-    return AppContext(s, open_database(s.db_path))
+    database_missing = not s.db_path.exists()
+    ctx = AppContext(s, open_database(s.db_path))
+    if database_missing:
+        restore_state(ctx.db, s.data_dir)
+    migrate_legacy_media(ctx)
+    ctx.portable = PortableStore(ctx)
+    ctx.db.after_commit = ctx.portable.schedule
+    ctx.db.flush_mirror = ctx.portable.sync
+    ctx.portable.sync()
+    return ctx

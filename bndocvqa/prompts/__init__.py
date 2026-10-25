@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from ..models.taxonomy import ABSTAIN_TEXT, CLAIM_CONTRADICTED, CLAIM_INSUFFICIENT, CLAIM_SUPPORTED, taxonomy_markdown
 
-PROMPT_VERSION = "page-v2"
+PROMPT_VERSION = "page-v3-doccap"
 
 # Page classifications. Pages of the NO_QUESTION_TYPES kinds never get questions.
 PAGE_TYPES = {
@@ -26,8 +26,10 @@ PAGE_TYPES = {
 NO_QUESTION_TYPES = {"blank", "qr_or_barcode", "signature_or_stamp", "image_only", "unreadable"}
 
 
-def page_prompt(questions_per_page: int) -> str:
-    n = questions_per_page
+def page_prompt(page_limit: int, document_limit: int | None = None) -> str:
+    n = max(0, page_limit)
+    document_rule = (f"This document has a hard maximum of {document_limit} questions across all its pages. "
+                     if document_limit is not None else "")
     types = "\n".join(f"- {k}: {v}" for k, v in PAGE_TYPES.items())
     return f"""You are building a Bangla Document Visual Question Answering benchmark.
 You are given ONE page image from a Bangladeshi document (government notice, form, circular, report, table,
@@ -42,13 +44,12 @@ Set page_note to a short English description of what the page contains (e.g. "si
 If page_type is blank, qr_or_barcode, signature_or_stamp, image_only or unreadable, return "questions": [] and stop.
 Such pages are kept in the dataset without questions; inventing questions about them is an error.
 
-STEP 2 — WRITE QUESTIONS (only for pages with readable information)
+STEP 2 — WRITE Medium Hard to Hard QUESTIONS (only for pages with readable information)
 Write multiple-choice questions that test whether a reader truly understands THIS page.
 
 HOW MANY
-Aim for about {n} questions. This is guidance, not a quota:
-- A dense page (tables, several sections, charts) may support more ({n + 1}-{n + 3}).
-- A page with little information (a cover, a short note, one stamped line) may support only 1-2.
+{document_rule}Return AT MOST {n} questions for this page. This is a hard maximum, not a target.
+A sparse page may support fewer, including zero. Do not exceed the maximum even on a dense page.
 Never write a weak, trivial, ambiguous or repetitive question just to reach a number, and never ask the same fact
 twice in different words.
 
@@ -57,7 +58,6 @@ WHAT NOT TO ASK
 - Do not ask what a signature says, what a seal or logo looks like, or about colours, fonts and decorations,
   unless that visual element carries document information (e.g. a chart legend colour, a ticked checkbox, a
   printed name under a signature).
-- Do not ask about a photo's appearance; ask only about information the page states (captions, labels, text).
 - Do not ask about text you cannot read with certainty (blurred, cut off, overlapped by a stamp).
 
 LANGUAGE
@@ -73,7 +73,7 @@ Notes: C05 counts items rather than copying a printed total (copying a total is 
 the page and never assumes undocumented taxes or fees. C15 needs an explicit amendment/precedence on the page.
 
 ANSWER FORMAT PER QUESTION TYPE
-1. Ordinary questions (B01, C01-C15): give the exact correct answer and FOUR distractors.
+1. Medium Hard to hard questions (B01, C01-C15): give the exact correct answer and FOUR distractors.
 2. B03 (abstention): at most ONE per page, and only on a page with real content. Ask for something this
    particular page would naturally be expected to state but certainly does NOT (e.g. a notice that gives a
    date and venue but no time; a fee table with no late fee). It must be specific to this page's subject —
