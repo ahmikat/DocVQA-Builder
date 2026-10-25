@@ -56,6 +56,22 @@ def test_view_opens_saved_html_and_review_opens_editor(qapp, ctx, doc, monkeypat
     w.close()
 
 
+def test_view_uses_available_height_for_document_and_questions(qapp, ctx, doc, no_dialogs):
+    from bndocvqa.ui.main_window import MainWindow
+    from PySide6.QtWidgets import QLabel, QSplitter
+
+    w = MainWindow(ctx)
+    w.tabs.setCurrentWidget(w.view)
+    w.show()
+    qapp.processEvents()
+    split = w.view.layout().itemAt(0).widget()
+    assert isinstance(split, QSplitter)
+    assert split.height() >= w.view.height() - 20
+    assert not any(label.text() in ("REVIEW WORKSPACE", "Review questions", "Question review")
+                   for label in w.view.findChildren(QLabel))
+    w.close()
+
+
 def test_windows_html_opener_uses_default_file_application(tmp_path, monkeypatch):
     if os.name != "nt":
         pytest.skip("Windows file association")
