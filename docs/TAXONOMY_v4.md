@@ -9,7 +9,7 @@ The machine-readable source of truth is [bndocvqa/models/taxonomy.py](../bndocvq
 | Code | Name | Definition |
 |---|---|---|
 | B01 | Direct evidence reading | Identify a specific fact or number explicitly stated in the document. |
-| B03 | Evidence sufficiency and abstention | Determine that the required information is absent after reviewing the relevant complete document. |
+| B03 | Evidence sufficiency and abstention | Determine that the required information is absent from the provided page after checking related details. |
 | B04 | Claim verification | Classify a specific claim as supported, contradicted, or insufficient information. |
 
 ### C-axis: Document capabilities

@@ -22,7 +22,7 @@ AXES: tuple[Axis, ...] = (
     Axis("B01", "Direct evidence reading", "B",
          "Identify a specific fact or number explicitly stated in the document."),
     Axis("B03", "Evidence sufficiency and abstention", "B",
-         "Determine that the required information is absent after reviewing the relevant complete document."),
+         "Determine that the required information is absent from the provided page after checking related details."),
     Axis("B04", "Claim verification", "B",
          "Classify a specific claim as supported, contradicted, or insufficient information."),
     Axis("C01", "Structural locating and layout", "C",

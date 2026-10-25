@@ -45,7 +45,7 @@ bndocvqa_archive_<YYYYMMDD_HHMMSS>/
   "reviewed": true,
   "reviewed_at": "2026-10-25T12:00:00+00:00",
   "model": "gemini-3.5-flash-lite",
-  "prompt_version": "page-v3-doccap",
+  "prompt_version": "page-v4-reasoning",
   "source_file": "original-name.pdf"
 }
 ```

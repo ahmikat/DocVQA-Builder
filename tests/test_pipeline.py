@@ -22,7 +22,7 @@ def test_one_request_per_page_and_questions_stored(ctx, doc):
     assert [q.question_id for q in qs] == ["doc_1_p1_q1", "doc_1_p1_q2", "doc_1_p1_q3", "doc_1_p2_q1"]
     assert all(p.status == "done" for p in ctx.pages.for_document("doc_1"))
     assert ctx.documents.is_finished("doc_1")
-    assert qs[0].model == ctx.settings.gemini_model and qs[0].prompt_version == "page-v3-doccap"
+    assert qs[0].model == ctx.settings.gemini_model and qs[0].prompt_version == "page-v4-reasoning"
 
 
 def test_malformed_items_dropped_not_stored(ctx, doc):
@@ -138,10 +138,17 @@ def test_missing_or_unknown_page_type_keeps_questions(ctx, doc):
 
 
 def test_prompt_forbids_questions_on_empty_pages():
+    from bndocvqa.models.taxonomy import AXIS_CODES
+    from bndocvqa.prompts import AXIS_CHALLENGE_HINTS
     from bndocvqa.prompts import NO_QUESTION_TYPES, PAGE_SCHEMA, page_prompt
     t = page_prompt(5)
     assert '"questions": []' in t and "QR code" in t and "at most ONE per page" in t
     assert set(NO_QUESTION_TYPES) <= set(PAGE_SCHEMA["properties"]["page_type"]["enum"])
+    assert set(AXIS_CHALLENGE_HINTS) == set(AXIS_CODES)
+    assert all(t.count(f"`{code}`") == 1 for code in AXIS_CODES)
+    assert "not templates or quotas" in t
+    assert "exactly one clear, defensible answer" in " ".join(t.split())
+    assert "knowledge outside the image" in t
 
 
 @pytest.mark.parametrize("pages,maximum", [(0, 0), (1, 5), (2, 8), (3, 10),
