@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Iterable
 
 from .. import EXPORT_SCHEMA_VERSION, __version__
-from ..models.records import Document, Page, Question
+from ..models.records import Document, Page, Question, SourcePage
 from ..models.taxonomy import TAXONOMY_VERSION, axis_name
 from ..prompts import PROMPT_VERSION
 from .context import AppContext
@@ -47,7 +47,10 @@ def document_path(doc: Document) -> str:
     return f"documents/{Path(doc.file_path).name}"
 
 
-def question_record(q: Question, doc: Document, page: Page) -> dict:
+def question_record(q: Question, doc: Document, page: Page,
+                    pages: dict[str, Page] | None = None) -> dict:
+    page_map = pages or {page.page_id: page}
+    source_pages = q.source_pages or [SourcePage(page.page_id, q.evidence_snippet)]
     return {
         "question_id": q.question_id,
         "document_id": q.document_id,
@@ -65,6 +68,11 @@ def question_record(q: Question, doc: Document, page: Page) -> dict:
         "axis_name": axis_name(q.primary_axis),
         "sub_axes": list(q.sub_axes),
         "evidence_snippet": q.evidence_snippet,
+        "source_pages": [{"page_id": s.page_id, "page_number": page_map[s.page_id].page_number,
+                          "image_path": f"images/{Path(page_map[s.page_id].image_path).name}",
+                          "evidence_snippet": s.evidence_snippet, "used_for": s.used_for}
+                         for s in source_pages],
+        "reasoning_steps": list(q.reasoning_steps),
         "rationale": q.rationale,
         "edited": q.edited,
         "reviewed": q.reviewed,
@@ -78,7 +86,7 @@ def question_record(q: Question, doc: Document, page: Page) -> dict:
 CSV_COLUMNS = ["question_id", "document_id", "document_path", "page_id", "page_number", "image_path", "question_format",
                "question_type", "question_bn", "option_A", "option_B", "option_C", "option_D", "option_E",
                "correct_option", "answer_bn", "primary_axis", "axis_name", "sub_axes", "evidence_snippet",
-               "rationale", "edited", "reviewed", "reviewed_at", "model", "prompt_version", "source_file"]
+               "source_pages", "reasoning_steps", "rationale", "edited", "reviewed", "reviewed_at", "model", "prompt_version", "source_file"]
 
 
 def _flat(r: dict) -> dict:
@@ -86,6 +94,8 @@ def _flat(r: dict) -> dict:
     for lb in "ABCDE":
         out[f"option_{lb}"] = r["options"].get(lb, "")
     out["sub_axes"] = ";".join(r["sub_axes"])
+    out["source_pages"] = json.dumps(r["source_pages"], ensure_ascii=False)
+    out["reasoning_steps"] = json.dumps(r["reasoning_steps"], ensure_ascii=False)
     return out
 
 
@@ -150,7 +160,7 @@ def export_dataset(ctx: AppContext, location: str | Path, document_ids: Iterable
     pages = {p.page_id: p for d in finished for p in ctx.pages.for_document(d)}
     for p in pages.values():
         shutil.copy2(ctx.abs_path(p.image_path), root / "images" / Path(p.image_path).name)
-    records = [question_record(q, docs[q.document_id], pages[q.page_id])
+    records = [question_record(q, docs[q.document_id], pages[q.page_id], pages)
                for q in ctx.questions.for_documents(finished) if q.reviewed]
     records.sort(key=lambda r: (_doc_order(r["document_id"]), r["page_number"], r["question_id"]))
 

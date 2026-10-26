@@ -35,6 +35,7 @@ class MainWindow(QMainWindow):
         self.tabs.currentChanged.connect(self._tab_changed)
 
         self.library.openDocument.connect(self._open_document)
+        self.library.chatImported.connect(self._open_imported)
         self.library.processRequested.connect(self.process_documents)
         self.library.keysRequested.connect(self._keys)
         self.library.changed.connect(self.view.reload_documents)
@@ -60,6 +61,11 @@ class MainWindow(QMainWindow):
     def _open_document(self, document_id: str) -> None:
         self.tabs.setCurrentWidget(self.view)
         self.view.open_document(document_id)
+
+    def _open_imported(self, document_id: str, question_id: str) -> None:
+        self._open_document(document_id)
+        if question_id:
+            self.view.select_question(question_id)
 
     def _update_quota(self) -> None:
         from ..services.gemini.usage import quota_summary

@@ -7,7 +7,7 @@ from collections import Counter
 from dataclasses import asdict, fields
 from typing import Iterable, Optional
 
-from ..models.records import DONE, Document, Job, Option, Page, Question
+from ..models.records import DONE, Document, Job, Option, Page, Question, SourcePage
 from .connection import Database, utcnow
 
 
@@ -94,7 +94,7 @@ class PageRepo:
 
 
 class QuestionRepo:
-    SCALAR = [f.name for f in fields(Question) if f.name not in ("options", "sub_axes")]
+    SCALAR = [f.name for f in fields(Question) if f.name not in ("options", "sub_axes", "source_pages", "reasoning_steps")]
 
     def __init__(self, db: Database):
         self.db = db
@@ -117,10 +117,17 @@ class QuestionRepo:
     def _children(self, con: sqlite3.Connection, q: Question) -> None:
         con.execute("DELETE FROM question_options WHERE question_id=?", (q.question_id,))
         con.execute("DELETE FROM question_sub_axes WHERE question_id=?", (q.question_id,))
+        con.execute("DELETE FROM question_source_pages WHERE question_id=?", (q.question_id,))
+        con.execute("DELETE FROM question_reasoning_steps WHERE question_id=?", (q.question_id,))
         con.executemany("INSERT INTO question_options VALUES (?,?,?)",
                         [(q.question_id, o.label, o.text) for o in q.options])
         con.executemany("INSERT INTO question_sub_axes VALUES (?,?)",
                         [(q.question_id, a) for a in dict.fromkeys(q.sub_axes)])
+        con.executemany("INSERT INTO question_source_pages VALUES (?,?,?,?,?)",
+                        [(q.question_id, p.page_id, i, p.evidence_snippet, p.used_for)
+                         for i, p in enumerate(q.source_pages, 1)])
+        con.executemany("INSERT INTO question_reasoning_steps VALUES (?,?,?)",
+                        [(q.question_id, i, step) for i, step in enumerate(q.reasoning_steps, 1)])
 
     def save_edit(self, q: Question) -> Question:
         """Save a manual edit; the previous version is kept in question_history."""
@@ -133,7 +140,8 @@ class QuestionRepo:
             q.updated_at = utcnow()
             q.edited = before.edited or any(getattr(q, field) != getattr(before, field) for field in (
                 "question_bn", "question_format", "question_type", "options", "correct_option",
-                "answer_bn", "primary_axis", "sub_axes", "evidence_snippet", "rationale"))
+                "answer_bn", "primary_axis", "sub_axes", "evidence_snippet", "rationale",
+                "source_pages", "reasoning_steps"))
             q.reviewed = True
             q.reviewed_at = q.updated_at
             sets = ",".join(f"{k}=?" for k in self.SCALAR if k != "question_id")
@@ -179,6 +187,15 @@ class QuestionRepo:
         for r in self.db.query(f"SELECT * FROM question_sub_axes WHERE question_id IN ({marks}) ORDER BY axis_code",
                                ids):
             out[r["question_id"]].sub_axes.append(r["axis_code"])
+        for r in self.db.query(f"SELECT * FROM question_source_pages WHERE question_id IN ({marks}) ORDER BY position",
+                               ids):
+            out[r["question_id"]].source_pages.append(SourcePage(r["page_id"], r["evidence_snippet"], r["used_for"]))
+        for r in self.db.query(f"SELECT * FROM question_reasoning_steps WHERE question_id IN ({marks}) ORDER BY step_number",
+                               ids):
+            out[r["question_id"]].reasoning_steps.append(r["text"])
+        for q in out.values():
+            if not q.source_pages:  # questions created before the multi-page migration
+                q.source_pages = [SourcePage(q.page_id, q.evidence_snippet)]
         return list(out.values())
 
 

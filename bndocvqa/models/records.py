@@ -42,6 +42,13 @@ class Option:
 
 
 @dataclass
+class SourcePage:
+    page_id: str
+    evidence_snippet: str = ""
+    used_for: str = ""
+
+
+@dataclass
 class Question:
     question_id: str  # doc_1_p1_q1
     document_id: str
@@ -51,6 +58,8 @@ class Question:
     question_format: str = FORMAT_MCQ5
     question_type: str = TYPE_ANSWERABLE
     options: list[Option] = field(default_factory=list)
+    source_pages: list[SourcePage] = field(default_factory=list)
+    reasoning_steps: list[str] = field(default_factory=list)
     correct_option: str = ""
     answer_bn: str = ""
     primary_axis: str = ""
@@ -64,6 +73,7 @@ class Question:
     edited: bool = False
     reviewed: bool = False  # explicitly saved in View; eligible for dataset files
     reviewed_at: str = ""
+    import_key: str = ""  # stable fingerprint: importing the same chat item twice is harmless
 
     def option_map(self) -> dict[str, str]:
         return {o.label: o.text for o in self.options}

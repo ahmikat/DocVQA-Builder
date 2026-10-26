@@ -96,7 +96,8 @@ function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','
 function axisVisible(q) { return filter === 'all' || q.primary_axis === filter; }
 function questionMatches(q) {
   return !search || [q.question_bn, q.answer_bn, q.question_id, q.source_file,
-    q.evidence_snippet].some(v => String(v || '').toLocaleLowerCase().includes(search));
+    q.evidence_snippet, ...(q.source_pages || []).flatMap(p => [p.page_id, p.evidence_snippet, p.used_for]),
+    ...(q.reasoning_steps || [])].some(v => String(v || '').toLocaleLowerCase().includes(search));
 }
 function pageMatches(p) {
   return !search || [p.page_id, p.document_id, p.content_type, p.content_note,
@@ -133,12 +134,16 @@ function renderQ(q) {
   const opts = Object.entries(q.options).map(([lb, t]) =>
     `<div class="opt ${lb === q.correct_option ? 'ok' : ''}"><b>${lb}.</b>${esc(t)}</div>`).join('');
   const subs = q.sub_axes.map(a => `<span class="badge sub" title="${esc(AXES[a])}">${a}</span>`).join('');
+  const sources = (q.source_pages || []).map(p => `<div class="ev"><a href="#${esc(p.page_id)}">Page ${esc(p.page_number)}</a>` +
+    `${p.used_for ? ` · ${esc(p.used_for)}` : ''}: ${esc(p.evidence_snippet)}</div>`).join('');
+  const steps = (q.reasoning_steps || []).length ? `<div class="ev"><b>Reasoning:</b><ol>` +
+    q.reasoning_steps.map(s => `<li>${esc(s)}</li>`).join('') + '</ol></div>' : '';
   return `<div class="q"><div class="head"><span class="badge" title="${esc(q.axis_name)}">${q.primary_axis}</span>
     ${subs}${q.reviewed ? '<span class="badge saved">Saved for export</span>' : '<span class="badge draft">Draft</span>'}
     ${q.edited ? '<span class="badge edit">edited</span>' : ''}
     <span style="color:#6b7280">${esc(q.question_id)}</span></div>
     <div class="text">${esc(q.question_bn)}</div>${opts}
-    ${q.evidence_snippet ? `<div class="ev">প্রমাণ: ${esc(q.evidence_snippet)}</div>` : ''}</div>`;
+    ${sources || (q.evidence_snippet ? `<div class="ev">প্রমাণ: ${esc(q.evidence_snippet)}</div>` : '')}${steps}</div>`;
 }
 function renderMain() {
   const html = D.pages.map(p => {

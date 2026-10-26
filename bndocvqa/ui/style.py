@@ -66,7 +66,7 @@ QLabel#pageInfo {{ color: #b9c9dd; padding: 4px 2px; }}
 QLabel#questionHeader {{ color: #ecf4ff; font-size: 11pt; }}
 QLabel#questionText {{ font-size: 12.5pt; }}
 
-QFrame#surface, QFrame#toolbarSurface, QFrame#metricCard {{
+QFrame#surface, QFrame#reviewPanel, QFrame#toolbarSurface, QFrame#metricCard {{
     background: #152234; border: 1px solid #283a50; border-radius: 11px;
 }}
 QFrame#metricCard {{ background: #18283b; }}
@@ -106,6 +106,19 @@ QGroupBox {{
 QGroupBox::title {{ subcontrol-origin: margin; left: 14px; padding: 0 6px; color: #cfe0fa; }}
 QScrollArea {{ background: transparent; border: none; }}
 QScrollArea > QWidget > QWidget {{ background: transparent; }}
+
+/* Keep the review editor compact without changing the Library or dialogs. */
+QFrame#reviewPanel QWidget {{ font-size: 9.5pt; }}
+QFrame#reviewPanel QLabel#questionHeader {{ font-size: 9.5pt; }}
+QFrame#reviewPanel QPlainTextEdit#questionText {{ font-size: 11pt; padding: 3px 6px; }}
+QFrame#reviewPanel QLineEdit, QFrame#reviewPanel QPlainTextEdit,
+QFrame#reviewPanel QComboBox {{ padding: 2px 6px; border-radius: 6px; }}
+QFrame#reviewPanel QGroupBox#reviewOptions {{ margin-top: 9px; padding: 5px 5px 3px; }}
+QFrame#reviewPanel QGroupBox#reviewOptions::title {{ left: 10px; padding: 0 4px; }}
+QFrame#reviewPanel QListWidget::item {{ padding: 1px 4px; }}
+QFrame#reviewPanel QRadioButton {{ spacing: 4px; }}
+QFrame#reviewPanel QRadioButton::indicator {{ width: 13px; height: 13px; }}
+QFrame#reviewPanel QListWidget::indicator {{ width: 13px; height: 13px; }}
 
 QTableWidget, QListWidget {{
     background: #121f30; alternate-background-color: #17263a;

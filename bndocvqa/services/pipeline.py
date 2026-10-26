@@ -40,7 +40,9 @@ class Pipeline:
     # -- queueing ---------------------------------------------------------
     def process_document(self, document_id: str) -> list[Job]:
         """Queue every page of the document that is not done yet."""
-        return [self.enqueue_page(p.page_id) for p in self.ctx.pages.for_document(document_id) if p.status != DONE]
+        return [self.enqueue_page(p.page_id) for p in self.ctx.pages.for_document(document_id)
+                if p.status != DONE and not self.ctx.db.query_one(
+                    "SELECT 1 FROM questions WHERE page_id=? AND import_key<>'' LIMIT 1", (p.page_id,))]
 
     def enqueue_page(self, page_id: str) -> Job:
         page = self.ctx.pages.get(page_id)
@@ -59,6 +61,9 @@ class Pipeline:
         page = self.ctx.pages.get(job.page_id)
         doc = self.ctx.documents.get(page.document_id)
         cap = max_questions_for_document(doc.page_count)
+        if self.ctx.db.query_one("SELECT 1 FROM questions WHERE page_id=? AND import_key<>'' LIMIT 1",
+                                 (page.page_id,)):
+            return StageOutcome("existing page kept: imported chat questions", Usage())
         if page.status == DONE and self.ctx.db.query_one(
                 "SELECT COUNT(*) FROM questions WHERE page_id=? AND reviewed=1", (page.page_id,))[0]:
             return StageOutcome("existing page kept: saved questions", Usage())
@@ -130,6 +135,9 @@ class Pipeline:
             return StageOutcome("cancelled before write", res.usage, res.raw_text)
         with self.ctx.db.tx() as con:
             # Check again under the write lock, including edits from another app instance.
+            if con.execute("SELECT 1 FROM questions WHERE page_id=? AND import_key<>'' LIMIT 1",
+                           (page.page_id,)).fetchone():
+                return StageOutcome("existing page kept: imported chat questions", res.usage, res.raw_text)
             other_count = con.execute(
                 "SELECT COUNT(*) FROM questions WHERE document_id=? AND page_id<>?",
                 (page.document_id, page.page_id)).fetchone()[0]

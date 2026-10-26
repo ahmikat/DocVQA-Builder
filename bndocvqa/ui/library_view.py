@@ -34,6 +34,7 @@ def _open_local_html(path: Path) -> bool:
 
 class LibraryView(QWidget):
     openDocument = Signal(str)
+    chatImported = Signal(str, str)  # document_id, first new question_id
     status = Signal(str)
     changed = Signal()
     processRequested = Signal(list)  # document ids
@@ -131,6 +132,8 @@ class LibraryView(QWidget):
         self.search.setMinimumWidth(260)
         self.search.textChanged.connect(self._apply_filter)
         secondary.addWidget(self.search, 1)
+        secondary.addWidget(btn("Paste Gemini JSON…", self.import_chat_questions,
+                                "Match pasted questions to existing documents and stage drafts for manual review"))
         secondary.addWidget(btn("Select all", lambda: self._set_all(True)))
         secondary.addWidget(btn("Clear", lambda: self._set_all(False)))
         secondary.addWidget(btn("Remove…", self.remove_checked, "Remove the ticked documents (files go to trash)"))
@@ -259,6 +262,14 @@ class LibraryView(QWidget):
         return [d.document_id for d in self.ctx.documents.list() if d.document_id in self._checked]
 
     # -- import -----------------------------------------------------------------
+    def import_chat_questions(self):
+        from .chat_import_dialog import ChatImportDialog
+        dialog = ChatImportDialog(self.ctx, self)
+        if dialog.exec() == dialog.Accepted:
+            self.refresh()
+            self.changed.emit()
+            self.chatImported.emit(dialog.document_id, dialog.created_ids[0] if dialog.created_ids else "")
+
     def import_files(self):
         exts = " ".join(f"*{e}" for e in sorted(SUPPORTED_EXTS))
         paths, _ = QFileDialog.getOpenFileNames(self, "Import documents", "", f"Documents ({exts})")

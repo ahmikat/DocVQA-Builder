@@ -40,6 +40,9 @@ bndocvqa_archive_<YYYYMMDD_HHMMSS>/
   "axis_name": "Table interpretation",
   "sub_axes": ["B01"],
   "evidence_snippet": "…",
+  "source_pages": [{"page_id": "doc_1_p1", "page_number": 1,
+                    "image_path": "images/doc_1_p1.png", "evidence_snippet": "…", "used_for": "…"}],
+  "reasoning_steps": ["…"],
   "rationale": "…",
   "edited": false,
   "reviewed": true,
@@ -55,12 +58,14 @@ The values above illustrate the schema. They are not an actual record.
 - `question_format` is `mcq5` (options A–E) or `verify3` (B04: options A=`সমর্থিত`, B=`খণ্ডনকৃত`, C=`অপর্যাপ্ত তথ্য`).
 - `question_type` is `answerable`, `abstention` (B03, answer `প্রদত্ত নথিতে উল্লেখ নেই`) or `claim_verification` (B04).
 - `answer_bn` is always the text of `options[correct_option]`.
+- `source_pages` lists every page needed to verify the answer, in evidence order; a question may have several. `page_id` and `image_path` at the top level remain the first source page for older consumers.
+- `reasoning_steps` preserves the calculation or cross-page reasoning supplied in a reviewed Gemini chat question. Ordinary page-generated questions normally have an empty array.
 - `reviewed` is `true` after a manual Save in the View tab; only these records appear in the main dataset files. `reviewed_at` records the last Save time.
 - `edited` is `true` when the question's content was changed in the View tab. Saving an unchanged question marks it reviewed without marking it edited.
 - `document_path` and `image_path` are relative to the archive folder.
 - `documents/` holds exact copies of the imported files. Their SHA-256 values can be checked against `data/documents.json` and `manifest.json`; `source_file` gives each one's original filename.
 
-In the CSV, the options are in the columns `option_A` to `option_E`, and `sub_axes` is separated by `;`.
+In the CSV, the options are in the columns `option_A` to `option_E`, `sub_axes` is separated by `;`, and `source_pages` and `reasoning_steps` are JSON strings.
 
 ## Predictions (for `python -m bndocvqa evaluate`)
 

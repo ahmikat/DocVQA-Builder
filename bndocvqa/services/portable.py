@@ -24,7 +24,8 @@ from .files import resolve_inside, sha256_file
 from .viewer_html import render_viewer
 
 RESTORE_ORDER = ("meta", "documents", "pages", "questions", "question_options",
-                 "question_sub_axes", "question_history", "jobs", "api_requests")
+                 "question_sub_axes", "question_source_pages", "question_reasoning_steps",
+                 "question_history", "jobs", "api_requests")
 FORMAT_VERSION = 1
 log = logging.getLogger(__name__)
 
@@ -86,6 +87,18 @@ def _viewer_records(tables: dict[str, list[dict]]) -> tuple[list[dict], list[dic
     sub_axes: dict[str, list[str]] = {}
     for sub in tables.get("question_sub_axes", []):
         sub_axes.setdefault(sub["question_id"], []).append(sub["axis_code"])
+    source_pages: dict[str, list[dict]] = {}
+    for source in tables.get("question_source_pages", []):
+        page = pages[source["page_id"]]
+        source_pages.setdefault(source["question_id"], []).append({
+            "page_id": source["page_id"], "page_number": page["page_number"],
+            "image_path": f"images/{Path(page['image_path']).name}",
+            "evidence_snippet": source["evidence_snippet"], "used_for": source["used_for"],
+            "position": source["position"],
+        })
+    reasoning_steps: dict[str, list[dict]] = {}
+    for step in tables.get("question_reasoning_steps", []):
+        reasoning_steps.setdefault(step["question_id"], []).append(step)
     records = []
     for q in tables.get("questions", []):
         doc, page = docs[q["document_id"]], pages[q["page_id"]]
@@ -101,6 +114,14 @@ def _viewer_records(tables: dict[str, list[dict]]) -> tuple[list[dict], list[dic
             "primary_axis": q["primary_axis"], "axis_name": axis.name if axis else q["primary_axis"],
             "sub_axes": sorted(sub_axes.get(q["question_id"], [])),
             "evidence_snippet": q["evidence_snippet"], "rationale": q["rationale"],
+            "source_pages": [{k: v for k, v in source.items() if k != "position"}
+                             for source in sorted(source_pages.get(q["question_id"], [{
+                                 "page_id": q["page_id"], "page_number": page["page_number"],
+                                 "image_path": f"images/{Path(page['image_path']).name}",
+                                 "evidence_snippet": q["evidence_snippet"], "used_for": "", "position": 1,
+                             }]), key=lambda s: s["position"])],
+            "reasoning_steps": [s["text"] for s in sorted(reasoning_steps.get(q["question_id"], []),
+                                                         key=lambda s: s["step_number"])],
             "edited": bool(q["edited"]), "reviewed": bool(q["reviewed"]),
             "reviewed_at": q["reviewed_at"], "model": q["model"],
             "prompt_version": q["prompt_version"], "source_file": doc["original_filename"],
