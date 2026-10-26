@@ -122,6 +122,37 @@ def test_view_edit_and_axis_filter(qapp, ctx, doc, no_dialogs):
     w.close()
 
 
+def test_save_opens_next_visible_question_only_after_success(qapp, ctx, doc, no_dialogs):
+    from PySide6.QtCore import Qt
+    from bndocvqa.ui.main_window import MainWindow
+
+    Pipeline(ctx).process_document("doc_1")
+    run(ctx, FakeProvider([{"questions": ITEMS}, {"questions": ITEMS[:1]}]))
+    window = MainWindow(ctx)
+    window._open_document("doc_1")
+    view = window.view
+    view.axis_filter.setCurrentIndex(view.axis_filter.findData("B01"))
+    assert view.qlist.count() == 2
+    view.qlist.setCurrentRow(0)
+    first_id = view.q.question_id
+    next_id = view.qlist.item(1).data(Qt.UserRole)
+
+    view.question_edit.clear()
+    view.save()
+    assert view.q.question_id == first_id and not ctx.questions.get(first_id).reviewed
+
+    view.question_edit.setPlainText("সম্পাদিত প্রশ্ন?")
+    view.save()
+    assert ctx.questions.get(first_id).reviewed
+    assert view.q.question_id == next_id
+    assert view.axis_filter.currentData() == "B01"
+
+    view.save()
+    assert ctx.questions.get(next_id).reviewed
+    assert view.q.question_id == next_id  # last question in this filter stays selected
+    window.close()
+
+
 def test_status_text(qapp, ctx, doc, no_dialogs):
     from bndocvqa.ui.library_view import LibraryView
     lib = LibraryView(ctx)

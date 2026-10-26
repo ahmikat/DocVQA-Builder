@@ -271,7 +271,7 @@ class ViewTab(QWidget):
         scroll.setFrameShape(QFrame.NoFrame)
 
         self.save_btn = QPushButton("Save")
-        self.save_btn.setToolTip("Save and include this question in CSV/JSON/XLSX (Ctrl+S)")
+        self.save_btn.setToolTip("Save to CSV/JSON/XLSX and open the next visible question (Ctrl+S)")
         self.save_btn.clicked.connect(self.save)
         bl = QHBoxLayout()
         bl.addStretch(1)
@@ -565,6 +565,9 @@ class ViewTab(QWidget):
         if problem:
             QMessageBox.warning(self, "Cannot save", f"Not saved: {problem}.")
             return
+        row = self.qlist.currentRow()
+        following = self.qlist.item(row + 1) if row >= 0 else None
+        next_question_id = following.data(Qt.UserRole) if following else None
         self.q = self.ctx.questions.save_edit(q)
         try:
             self.ctx.portable.sync()
@@ -573,4 +576,6 @@ class ViewTab(QWidget):
             self.ctx.db.last_mirror_error = str(exc)
             QMessageBox.warning(self, "Dataset files", f"Question saved in the app, but CSV/JSON sync failed:\n{exc}")
         self._load_questions()
+        if next_question_id:
+            self.select_question(next_question_id)
         self.questionsChanged.emit()
