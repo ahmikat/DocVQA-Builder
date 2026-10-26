@@ -7,7 +7,7 @@ from collections import Counter
 from typing import Optional
 
 from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QKeySequence, QShortcut, QTextDocument
+from PySide6.QtGui import QColor, QKeySequence, QPainter, QPen, QShortcut, QTextDocument
 from PySide6.QtWidgets import (QButtonGroup, QComboBox, QFormLayout, QFrame, QGridLayout, QGroupBox, QHBoxLayout,
                                QLabel, QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPlainTextEdit,
                                QPushButton, QRadioButton, QScrollArea, QSizePolicy, QSplitter, QVBoxLayout, QWidget)
@@ -52,6 +52,68 @@ class AutoHeightQuestionEdit(QPlainTextEdit):
             self._fitting = False
 
 
+class ResizableReasoningEdit(AutoHeightQuestionEdit):
+    """Fit the whole explanation by default; allow a shorter, scrollable height."""
+
+    def __init__(self, parent=None):
+        self.user_height: int | None = None
+        super().__init__(parent)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+
+    def fit_to_text(self):
+        if self.user_height is None:
+            super().fit_to_text()
+
+    def set_user_height(self, height: int):
+        self.user_height = max(36, height)
+        self.setFixedHeight(self.user_height)
+
+    def reset_to_text(self):
+        self.user_height = None
+        super().fit_to_text()
+
+
+class ReasoningResizeGrip(QWidget):
+    """Drag the bottom edge like a textarea; double-click to restore full height."""
+
+    def __init__(self, editor: ResizableReasoningEdit, parent=None):
+        super().__init__(parent)
+        self.editor = editor
+        self._drag_start: float | None = None
+        self._start_height = 0
+        self.setFixedHeight(11)
+        self.setCursor(Qt.SizeVerCursor)
+        self.setToolTip("Drag up or down to resize reasoning steps. Double-click to fit all text.")
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag_start = event.globalPosition().y()
+            self._start_height = self.editor.height()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if self._drag_start is not None:
+            delta = round(event.globalPosition().y() - self._drag_start)
+            self.editor.set_user_height(self._start_height + delta)
+            event.accept()
+
+    def mouseReleaseEvent(self, event):
+        self._drag_start = None
+        event.accept()
+
+    def mouseDoubleClickEvent(self, event):
+        self._drag_start = None
+        self.editor.reset_to_text()
+        event.accept()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setPen(QPen(QColor("#7590b2"), 1))
+        right, bottom = self.width() - 5, self.height() - 2
+        for offset in (0, 4, 8):
+            painter.drawLine(right - offset, bottom, right, bottom - offset)
+
+
 class ViewTab(QWidget):
     status = Signal(str)
     questionsChanged = Signal()
@@ -66,6 +128,7 @@ class ViewTab(QWidget):
         self._questions: list[Question] = []
         self._working_sources = []
         self._source_index = -1
+        self._reasoning_heights: dict[str, int] = {}
 
         # left: document + pages
         self.doc_combo = QComboBox()
@@ -158,8 +221,17 @@ class ViewTab(QWidget):
         self.source_evidence = QPlainTextEdit()
         self.source_evidence.setFixedHeight(52)
         self.source_used_for = QLineEdit()
-        self.reasoning = QPlainTextEdit()
-        self.reasoning.setFixedHeight(62)
+        self.reasoning = ResizableReasoningEdit()
+        self.reasoning.setObjectName("reasoningText")
+        self.reasoning_grip = ReasoningResizeGrip(self.reasoning)
+        self.reasoning_grip.setObjectName("reasoningResizeGrip")
+        reasoning_box = QWidget()
+        reasoning_box.setObjectName("reasoningBox")
+        reasoning_layout = QVBoxLayout(reasoning_box)
+        reasoning_layout.setContentsMargins(0, 0, 0, 0)
+        reasoning_layout.setSpacing(0)
+        reasoning_layout.addWidget(self.reasoning)
+        reasoning_layout.addWidget(self.reasoning_grip)
         self.rationale = QPlainTextEdit()
         self.rationale.setFixedHeight(40)
 
@@ -182,7 +254,8 @@ class ViewTab(QWidget):
         f2.setVerticalSpacing(4)
         self.reasoning.setToolTip("One reasoning step per line")
         self.source_list.setToolTip("Click a source page to display its image and evidence")
-        f2.addRow("Reasoning steps", self.reasoning)
+        f2.addRow("Reasoning steps ↕", reasoning_box)
+        f2.labelForField(reasoning_box).setToolTip("Drag the lower-right grip to resize; double-click it to fit all text")
         f2.addRow("Source pages", self.source_list)
         f2.addRow("Selected evidence", self.source_evidence)
         f2.addRow("Used for", self.source_used_for)
@@ -339,7 +412,8 @@ class ViewTab(QWidget):
     # -- editor -----------------------------------------------------------------
     def _set_editor_enabled(self, on: bool) -> None:
         for w in (self.question_edit, self.axis_combo, self.sub_axes, self.evidence, self.source_list,
-                  self.source_evidence, self.source_used_for, self.reasoning, self.rationale, self.save_btn,
+                  self.source_evidence, self.source_used_for, self.reasoning, self.reasoning_grip,
+                  self.rationale, self.save_btn,
                   *[w for row in self.opt_rows.values() for w in row]):
             w.setEnabled(on)
         if not on:
@@ -353,6 +427,11 @@ class ViewTab(QWidget):
             self._fill(q)
 
     def _fill(self, q: Question) -> None:
+        if self.q:
+            if self.reasoning.user_height is None:
+                self._reasoning_heights.pop(self.q.question_id, None)
+            else:
+                self._reasoning_heights[self.q.question_id] = self.reasoning.user_height
         self._loading = True
         try:
             self.q = q
@@ -385,6 +464,11 @@ class ViewTab(QWidget):
                 self.source_list.setCurrentRow(0)
                 self._load_source_editor(0)
             self.reasoning.setPlainText("\n".join(q.reasoning_steps))
+            saved_height = self._reasoning_heights.get(q.question_id)
+            if saved_height is None:
+                self.reasoning.reset_to_text()
+            else:
+                self.reasoning.set_user_height(saved_height)
             self.rationale.setPlainText(q.rationale)
         finally:
             self._loading = False

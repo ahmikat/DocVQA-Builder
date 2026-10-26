@@ -130,6 +130,7 @@ def test_paste_dialog_previews_match_and_opens_view(qapp, ctx, doc, no_dialogs):
 
 def test_compact_review_order_and_full_question_height(qapp, ctx, doc, no_dialogs):
     from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QGroupBox
     from bndocvqa.ui.main_window import MainWindow
 
@@ -149,4 +150,26 @@ def test_compact_review_order_and_full_question_height(qapp, ctx, doc, no_dialog
     qapp.processEvents()
     assert view.question_edit.height() > short_height
     assert view.question_edit.verticalScrollBarPolicy() == Qt.ScrollBarAlwaysOff
+
+    view.reasoning.setPlainText("প্রথম ধাপের ব্যাখ্যা এবং হিসাব। " * 35)
+    qapp.processEvents()
+    full_height = view.reasoning.height()
+    assert full_height > 62
+    assert view.reasoning.verticalScrollBar().maximum() == 0
+    grip = view.reasoning_grip
+    QTest.mousePress(grip, Qt.LeftButton, pos=QPoint(20, 5))
+    QTest.mouseMove(grip, QPoint(20, -full_height))
+    QTest.mouseRelease(grip, Qt.LeftButton, pos=QPoint(20, -full_height))
+    qapp.processEvents()
+    assert view.reasoning.height() == 36
+    assert view.reasoning.verticalScrollBar().maximum() > 0
+    reloaded = ctx.questions.get(ids[0])
+    reloaded.reasoning_steps = ["প্রথম ধাপের ব্যাখ্যা এবং হিসাব। " * 35]
+    view._fill(reloaded)
+    qapp.processEvents()
+    assert view.reasoning.height() == 36  # manual size survives a question reload
+    QTest.mouseDClick(grip, Qt.LeftButton, pos=QPoint(20, 5))
+    qapp.processEvents()
+    assert view.reasoning.height() >= full_height
+    assert view.reasoning.verticalScrollBar().maximum() == 0
     window.close()

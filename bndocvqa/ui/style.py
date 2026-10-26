@@ -111,6 +111,11 @@ QScrollArea > QWidget > QWidget {{ background: transparent; }}
 QFrame#reviewPanel QWidget {{ font-size: 9.5pt; }}
 QFrame#reviewPanel QLabel#questionHeader {{ font-size: 9.5pt; }}
 QFrame#reviewPanel QPlainTextEdit#questionText {{ font-size: 11pt; padding: 3px 6px; }}
+QFrame#reviewPanel QWidget#reasoningResizeGrip {{
+    background: #1b2a3d; border: 1px solid #34465d; border-top: none;
+    border-bottom-left-radius: 6px; border-bottom-right-radius: 6px;
+}}
+QFrame#reviewPanel QWidget#reasoningResizeGrip:hover {{ background: #263b55; border-color: #5e7fa7; }}
 QFrame#reviewPanel QLineEdit, QFrame#reviewPanel QPlainTextEdit,
 QFrame#reviewPanel QComboBox {{ padding: 2px 6px; border-radius: 6px; }}
 QFrame#reviewPanel QGroupBox#reviewOptions {{ margin-top: 9px; padding: 5px 5px 3px; }}
